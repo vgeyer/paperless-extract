@@ -1,0 +1,57 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*net/http.Response.Body).Close
+    gosec:
+      excludes:
+        - G104 # unchecked errors: covered by errcheck
+        - G304 # file inclusion via variable: PROMPT_FILE / *_FILE / eval set are operator-provided paths
+    revive:
+      rules:
+        - name: exported
+          disabled: true # internal packages; doc comments are not enforced
+        - name: package-comments
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - errcheck
+          - gosec
+          - noctx
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/vgeyer/paperless-extract

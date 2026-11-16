@@ -1,0 +1,99 @@
+# Example deployment of paperless-extract next to Paperless-ngx and Ollama.
+#
+# Copy to compose.yaml (or merge the service into your existing Paperless
+# compose file), create the secret files and adjust the model.
+#
+#   mkdir -p secrets
+#   openssl rand -hex 32 > secrets/webhook_secret      # >= 16 bytes
+#   echo '<API token of a dedicated Paperless user>' > secrets/paperless_token
+#   chmod 600 secrets/*
+#
+# The distroless image runs as uid/gid 65532. Docker Compose secrets with a
+# file source are bind mounts, so the files must be readable by that uid
+# (e.g. `chown 65532:65532 secrets/*`, or chmod 644 on a single-user host).
+#
+# --- Paperless-ngx side -----------------------------------------------------
+#
+# 1. Set PAPERLESS_URL in the Paperless container (e.g. https://paperless.example.org),
+#    otherwise the {{doc_url}} placeholder is not usable.
+# 2. Paperless restricts webhook targets. Internal hostnames and non-standard
+#    ports may be blocked by default; check the PAPERLESS_WEBHOOKS_* settings
+#    of your version, for example:
+#      PAPERLESS_WEBHOOKS_ALLOW_INTERNAL_REQUESTS: "true"
+#      PAPERLESS_WEBHOOKS_ALLOWED_PORTS: "8080"
+# 3. Create a custom field of type "Monetary" named "Total amount"
+#    (or whatever CUSTOM_FIELD_NAME says). The service fails at startup if it
+#    does not exist.
+# 4. Create an API token for a dedicated, low-privilege user that can view and
+#    change the relevant documents. Put it into secrets/paperless_token.
+# 5. Create a workflow (field names as in the Paperless UI, may vary by version):
+#      Trigger:  Document Added   (NOT "Document Updated": writing the field
+#                                  is an update and would loop)
+#      Filter:   document type Invoice / Quote
+#      Action:   Webhook
+#        URL:     http://paperless-extract:8080/webhook
+#        Use parameters for webhook body: off
+#        Send webhook payload as JSON: on
+#        Body:    {"doc_url": "{{doc_url}}", "title": "{{doc_title}}", "document_type": "{{document_type}}"}
+#        Headers: X-Webhook-Secret: <content of secrets/webhook_secret>
+#        Include document: off
+# 6. Optional: a saved view "document type Invoice/Quote, Total amount empty"
+#    lists documents where extraction failed or was rejected.
+# ---------------------------------------------------------------------------
+
+services:
+  paperless-extract:
+    # Pin a released version in production; "edge" follows main.
+    image: ghcr.io/vgeyer/paperless-extract:1.0.0
+    restart: unless-stopped
+    # Matches the service's SHUTDOWN_TIMEOUT (25s) plus headroom.
+    stop_grace_period: 30s
+    environment:
+      PAPERLESS_URL: http://paperless:8000        # internal URL of the Paperless webserver
+      PAPERLESS_TOKEN_FILE: /run/secrets/paperless_token
+      WEBHOOK_SECRET_FILE: /run/secrets/webhook_secret
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5:14b
+      OLLAMA_NUM_CTX: "65536"
+      # Optional, defaults shown:
+      # LISTEN_ADDR: ":8080"
+      # OLLAMA_NUM_PREDICT: "256"
+      # OLLAMA_TIMEOUT: 5m
+      # OLLAMA_KEEP_ALIVE: 5m
+      # CUSTOM_FIELD_NAME: Total amount
+      # DEFAULT_CURRENCY: EUR
+      # MAX_AMOUNT: "1000000"
+      # OVERWRITE_EXISTING: "false"
+      # QUEUE_SIZE: "100"
+      # WORKERS: "1"
+      # SHUTDOWN_TIMEOUT: 25s
+      # LOG_LEVEL: info                           # debug logs document content - avoid in production
+      # PROMPT_FILE: /config/prompt.tmpl
+    secrets:
+      - paperless_token
+      - webhook_secret
+    # Optional prompt override:
+    # volumes:
+    #   - ./prompt.tmpl:/config/prompt.tmpl:ro
+    networks:
+      - paperless
+    # No published port: Paperless reaches the service over the shared network.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+secrets:
+  paperless_token:
+    file: ./secrets/paperless_token
+  webhook_secret:
+    file: ./secrets/webhook_secret
+
+networks:
+  # The existing network Paperless and Ollama are attached to (see
+  # `docker network ls`). If you merge this service into the Paperless compose
+  # file instead, drop `external`/`name` and use that project's network.
+  paperless:
+    external: true
+    name: paperless_default

@@ -1,0 +1,23 @@
+# Secrets and local environment
+.env
+.env.*
+*.env
+secrets/
+
+# Local evaluation set (real documents, never committed)
+evalset/
+
+# Build output
+bin/
+dist/
+/paperless-extract
+*.exe
+*.test
+*.out
+coverage.*
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
